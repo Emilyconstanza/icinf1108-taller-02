@@ -11,7 +11,7 @@ Proyecto FastAPI para administrar estudiantes y mascotas. La creación de un est
 
 ## Resumen funcional
 
-La API expone operaciones CRUD completas sobre estudiantes y mascotas:
+La API expone CRUD de estudiantes y mascotas. La creación de un estudiante y sus mascotas anidadas usa PostgreSQL y una transacción SQLAlchemy. Las rutas CRUD independientes de mascotas todavía usan almacenamiento en memoria; no deben confundirse con la persistencia de la operación anidada.
 
 **Estudiantes** — `/api/students`
 
@@ -21,7 +21,7 @@ La API expone operaciones CRUD completas sobre estudiantes y mascotas:
 - **Actualizar**: `PATCH /api/students/:id`
 - **Eliminar**: `DELETE /api/students/:id` (elimina al estudiante y sus mascotas persistidas en la base de datos)
 
-**Mascotas** — `/api/students/:studentId/pets`
+**Mascotas (almacenamiento en memoria)** — `/api/students/:studentId/pets`
 
 - **Listar**: `GET /api/students/:studentId/pets`
 - **Crear**: `POST /api/students/:studentId/pets`
@@ -49,31 +49,30 @@ Si no se envía `pets` (o se envía vacío), se crea únicamente el estudiante.
 
 ### Modelo de datos
 
-| Estudiante | Mascota        |
-| ---------- | -------------- |
-| id (UUID)  | id (UUID)      |
-| name       | studentId      |
-| username   | name           |
-| email      | species        |
-| age        | age (opcional) |
-| createdAt  | createdAt      |
-| updatedAt  | updatedAt      |
+| Estudiante SQL (`students`) | Mascota SQL (`pets`) |
+| --------------------------- | -------------------- |
+| id (UUID en texto)          | id (UUID en texto)   |
+| name                        | student_id (FK)      |
+| email (único, opcional)     | name                 |
+|                             | species              |
+|                             | age (opcional)       |
+
+La relación ORM permite varias mascotas por estudiante y elimina las mascotas asociadas cuando se elimina el estudiante. En cambio, las rutas independientes de mascotas usan un repositorio en memoria.
 
 ### Validación y unicidad
 
 La validación se realiza con Pydantic v2:
 
-- `name` (estudiante): texto de 3 a 100 caracteres, sin etiquetas HTML.
-- `username`: texto de 3 a 30 caracteres, solo minúsculas, números y guiones bajos (`^[a-z0-9_]+$`).
-- `email`: dirección de correo electrónico válida.
-- `age` (estudiante): entero entre 18 y 99.
-- `name` / `species` (mascota): texto de 1 a 50 caracteres, sin etiquetas HTML.
-- `age` (mascota): entero entre 0 y 100 (opcional).
+- `name` (estudiante): texto obligatorio.
+- `email` (estudiante): dirección válida y opcional.
+- `name` y `species` (mascota): texto entre 1 y 50 caracteres, sin etiquetas HTML.
+- `age` (mascota): entero entre 0 y 100, opcional.
 
 Unicidad (rechazado con `409 Conflict`):
 
-- Estudiante: `email` y `username` deben ser únicos.
-- Mascota: `name` debe ser único dentro de un mismo estudiante.
+- Estudiante: `email` es único cuando se informa.
+- En una solicitud de alta: los nombres de mascotas no pueden repetirse.
+- El esquema ORM también declara el nombre de mascota único por estudiante.
 
 ## Estándar de respuesta JSON
 
@@ -107,11 +106,7 @@ Un middleware global ([`api_response.py`](app/shared/api_response.py)) envuelve 
   "data": {
     "id": "c3600646-abe8-4be3-8096-d6ad629388e2",
     "name": "Juan Pérez",
-    "username": "juanperez",
-    "email": "juan@example.com",
-    "age": 20,
-    "createdAt": "2026-09-09T16:49:33.000Z",
-    "updatedAt": "2026-09-09T16:49:33.000Z"
+    "email": "juan@example.com"
   }
 }
 ```
@@ -171,7 +166,7 @@ Ambos casos comparten el **mismo esquema** para que el frontend los trate igual:
 }
 ```
 
-- `400 Bad Request`: cuando falla la validación. Los DTOs replican las reglas y mensajes de class-validator (NestJS) en español; el handler global ([`exceptions.py`](app/shared/exceptions.py)) convierte los errores al mapa `{ campo: { message } }` (si un campo falla varias reglas, los mensajes se concatenan con `", "`; las propiedades no permitidas devuelven `errors: {}`).
+- `400 Bad Request`: cuando falla la validación de entrada. El handler global ([`exceptions.py`](app/shared/exceptions.py)) convierte los errores al mapa `{ campo: { message } }` (si un campo falla varias reglas, los mensajes se concatenan con `", "`).
 - `409 Conflict`: cuando se viola una restricción de unicidad. Los servicios lanzan una `HTTPException` con el mismo mapa `errors`, por lo que es indistinguible de una validación a nivel de estructura.
 
 ### Interpretación en el frontend
@@ -194,16 +189,21 @@ El cliente estático (`public/`) consume este estándar de forma uniforme:
 
 ## Ejecución con Docker (Recomendado)
 
-1. Crear el archivo `.env` en la raíz del proyecto:
-   ```env
-   POSTGRES_USER=postgres
-   POSTGRES_PASSWORD=postgres_password
-   POSTGRES_DB=taller_db
-   POSTGRES_PORT=5432
-   PGADMIN_DEFAULT_EMAIL=admin@admin.com
-   PGADMIN_DEFAULT_PASSWORD=admin_password
-   DATABASE_URL=postgresql://postgres:postgres_password@db:5432/taller_db
-   
+1. Copiar `.env.example` a `.env` y cambiar las claves de ejemplo para uso local.
+2. Iniciar PostgreSQL y pgAdmin con `docker compose up -d`.
+3. Instalar dependencias con `uv sync --group dev`.
+4. Configurar `DATABASE_URL` en la terminal donde se ejecutará la API. En PowerShell, por ejemplo: `$env:DATABASE_URL = "postgresql://postgres:CAMBIAR_CLAVE@localhost:5432/taller_db"`.
+5. Iniciar la API con `make dev`; abre Swagger en `http://localhost:3000/docs`.
+
+Compose inicia PostgreSQL y pgAdmin, no la API. La aplicación no ejecuta migraciones automáticamente; la creación del esquema debe prepararse antes de usar las rutas persistidas.
+
+Las variables de `.env` son consumidas por Docker Compose. La aplicación lee `DATABASE_URL` del entorno del proceso y no carga `.env` automáticamente.
+
+## Pruebas
+
+Instala las dependencias de desarrollo y ejecuta `uv run pytest`. La matriz de casos y sus resultados actuales están en [`pruebas.md`](pruebas.md). Las pruebas usan SQLite temporal y no requieren la base PostgreSQL local.
+
+El diagrama y el estado de las tareas de Isidora están en [`docs/diagrama-estudiantes-mascotas.md`](docs/diagrama-estudiantes-mascotas.md) y [`docs/avance-isidora.md`](docs/avance-isidora.md).
 ## Comandos útiles
 
 - `make install` — sincroniza dependencias con uv
