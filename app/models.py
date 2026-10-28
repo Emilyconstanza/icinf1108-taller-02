@@ -1,25 +1,37 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
+from uuid import uuid4
+
+from sqlalchemy import Column, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import relationship
+
 from app.database import Base
 
-class Usuario(Base):
-    __tablename__ = "usuarios"
 
-    id = Column(Integer, primary_index=True, index=True)
-    nombre = Column(String, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
+class Student(Base):
+    """Student entity used by the API's relational persistence layer."""
 
-    # Relación con otra entidad
-    registros = relationship("Registro", back_populates="propietario")
+    __tablename__ = "students"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name = Column(String(100), nullable=False)
+    email = Column(String(255), nullable=True, unique=True, index=True)
+    pets = relationship(
+        "Pet", back_populates="student", cascade="all, delete-orphan"
+    )
 
 
-class Registro(Base):
-    __tablename__ = "registros"
+class Pet(Base):
+    """Pet entity; its lifecycle is tied to its owning student."""
 
-    id = Column(Integer, primary_index=True, index=True)
-    titulo = Column(String, nullable=False)
-    descripcion = Column(String)
-    usuario_id = Column(Integer, ForeignKey("usuarios.id"))
+    __tablename__ = "pets"
+    __table_args__ = (
+        UniqueConstraint("student_id", "name", name="uq_pet_student_name"),
+    )
 
-    # Relación inversa
-    propietario = relationship("Usuario", back_populates="registros")
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    student_id = Column(
+        String(36), ForeignKey("students.id", ondelete="CASCADE"), nullable=False
+    )
+    name = Column(String(50), nullable=False)
+    species = Column(String(50), nullable=False)
+    age = Column(Integer, nullable=True)
+    student = relationship("Student", back_populates="pets")
