@@ -1,28 +1,51 @@
-from app.shared.in_memory_store import InMemoryStore
-from app.students.students_schemas import Student
-
+from typing import Optional
+from sqlalchemy.orm import Session
+from app.models import Student  # Ajusta según el nombre de tu modelo ORM
+from app.students.students_schemas import CreateStudentDto, UpdateStudentDto
 
 class StudentsRepository:
-    def __init__(self) -> None:
-        self._store: InMemoryStore[Student] = InMemoryStore()
+    def find_all(self, db: Session, limit: int = 100, offset: int = 0):
+        """Obtiene la lista de estudiantes con paginación básica."""
+        return db.query(Student).order_by(Student.id).offset(offset).limit(limit).all()
 
-    def find_all(self) -> list[Student]:
-        return self._store.find_all()
+    def find_by_id(self, db: Session, student_id: str) -> Optional[Student]:
+        """Busca un estudiante por su ID único."""
+        return db.query(Student).filter(Student.id == student_id).first()
 
-    def find_by_id(self, student_id: str) -> Student | None:
-        return self._store.get(student_id)
+    def find_by_email(self, db: Session, email: str) -> Optional[Student]:
+        """Verifica si ya existe un estudiante registrado con el mismo correo."""
+        return db.query(Student).filter(Student.email == email).first()
 
-    def find_by_email(self, email: str) -> Student | None:
-        matches = self._store.find_by(lambda student: student.email == email)
-        return matches[0] if matches else None
+    def create(self, db: Session, dto: CreateStudentDto) -> Student:
+        """Crea y persiste un nuevo registro de estudiante en PostgreSQL."""
+        nuevo_estudiante = Student(**dto.model_dump())
+        db.add(nuevo_estudiante)
+        db.commit()
+        db.refresh(nuevo_estudiante)
+        return nuevo_estudiante
 
-    def find_by_username(self, username: str) -> Student | None:
-        matches = self._store.find_by(lambda student: student.username == username)
-        return matches[0] if matches else None
+    def update(self, db: Session, student_id: str, dto: UpdateStudentDto) -> Optional[Student]:
+        """Actualiza parcialmente los datos de un estudiante existente."""
+        estudiante = self.find_by_id(db, student_id)
+        if not estudiante:
+            return None
+        
+        # Filtra únicamente los campos enviados en el payload
+        datos_actualizar = dto.model_dump(exclude_unset=True)
+        for clave, valor in datos_actualizar.items():
+            setattr(estudiante, clave, valor)
 
-    def save(self, student: Student) -> Student:
-        self._store.set(student)
-        return student
+        db.commit()
+        db.refresh(estudiante)
+        return estudiante
 
-    def delete(self, student_id: str) -> None:
-        self._store.delete(student_id)
+    def delete(self, db: Session, student_id: str) -> Optional[Student]:
+        """Elimina la entidad de la base de datos."""
+        estudiante = self.find_by_id(db, student_id)
+        if not estudiante:
+            return None
+        db.delete(estudiante)
+        db.commit()
+        return estudiante
+
+students_repository = StudentsRepository()

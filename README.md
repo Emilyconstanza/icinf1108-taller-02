@@ -1,16 +1,17 @@
 # CRUD Students & Pets (FastAPI)
 
-Proyecto FastAPI que implementa un **CRUD** para la entidad `Student` y sus `Pet`, con **almacenamiento en memoria** a través de repositorios respaldados por diccionarios. Los datos viven mientras el proceso esté corriendo.
+Proyecto FastAPI para administrar estudiantes y mascotas. La creación de un estudiante junto con sus mascotas se guarda en PostgreSQL mediante una única transacción SQLAlchemy.
 
 ## Tecnologías
 
 - Python 3.13
-- FastAPI + repositorios en memoria
+- FastAPI, SQLAlchemy y PostgreSQL
+- Repositorios en memoria para las rutas de mascotas existentes
 - HTML + JS + Tailwind CSS (frontend estático)
 
 ## Resumen funcional
 
-La API expone operaciones CRUD completas sobre estudiantes y mascotas:
+La API expone CRUD de estudiantes y mascotas. La creación de un estudiante y sus mascotas anidadas usa PostgreSQL y una transacción SQLAlchemy. Las rutas CRUD independientes de mascotas todavía usan almacenamiento en memoria; no deben confundirse con la persistencia de la operación anidada.
 
 **Estudiantes** — `/api/students`
 
@@ -18,9 +19,9 @@ La API expone operaciones CRUD completas sobre estudiantes y mascotas:
 - **Listar**: `GET /api/students`
 - **Buscar por id**: `GET /api/students/:id`
 - **Actualizar**: `PATCH /api/students/:id`
-- **Eliminar**: `DELETE /api/students/:id` (elimina también sus mascotas)
+- **Eliminar**: `DELETE /api/students/:id` (elimina al estudiante y sus mascotas persistidas en la base de datos)
 
-**Mascotas** — `/api/students/:studentId/pets`
+**Mascotas (almacenamiento en memoria)** — `/api/students/:studentId/pets`
 
 - **Listar**: `GET /api/students/:studentId/pets`
 - **Crear**: `POST /api/students/:studentId/pets`
@@ -34,9 +35,7 @@ La API expone operaciones CRUD completas sobre estudiantes y mascotas:
 ```json
 {
 	"name": "Ana Pérez",
-	"username": "ana_perez",
 	"email": "ana@example.com",
-	"age": 21,
 	"pets": [
 		{ "name": "Firulais", "species": "perro", "age": 3 },
 		{ "name": "Michi", "species": "gato" }
@@ -44,37 +43,36 @@ La API expone operaciones CRUD completas sobre estudiantes y mascotas:
 }
 ```
 
-Si no se envía `pets` (o se envía vacío), el comportamiento es exactamente el mismo de antes.
+Si no se envía `pets` (o se envía vacío), se crea únicamente el estudiante.
 
-> **Punto de transacción:** este endpoint realiza varias escrituras (el estudiante y cada mascota). Con un ORM/SQL, todas deben ejecutarse dentro de una transacción: si una mascota falla (por ejemplo, por nombre duplicado), el estudiante y las mascotas anteriores no deben quedar guardados. En esta versión en memoria la implementación es secuencial y **no** hace rollback, a propósito, para que la actividad de ORM/transacciones parta de ese problema.
+> **Transacción:** el endpoint agrega el estudiante, obtiene su ID con `flush()`, agrega las mascotas y confirma una sola vez con `commit()`. Si ocurre un error, ejecuta `rollback()` para que no queden cambios parciales. Los nombres de mascotas repetidos en el mismo envío se rechazan con HTTP 409.
 
 ### Modelo de datos
 
-| Estudiante | Mascota        |
-| ---------- | -------------- |
-| id (UUID)  | id (UUID)      |
-| name       | studentId      |
-| username   | name           |
-| email      | species        |
-| age        | age (opcional) |
-| createdAt  | createdAt      |
-| updatedAt  | updatedAt      |
+| Estudiante SQL (`students`) | Mascota SQL (`pets`) |
+| --------------------------- | -------------------- |
+| id (UUID en texto)          | id (UUID en texto)   |
+| name                        | student_id (FK)      |
+| email (único, opcional)     | name                 |
+|                             | species              |
+|                             | age (opcional)       |
+
+La relación ORM permite varias mascotas por estudiante y elimina las mascotas asociadas cuando se elimina el estudiante. En cambio, las rutas independientes de mascotas usan un repositorio en memoria.
 
 ### Validación y unicidad
 
 La validación se realiza con Pydantic v2:
 
-- `name` (estudiante): texto de 3 a 100 caracteres, sin etiquetas HTML.
-- `username`: texto de 3 a 30 caracteres, solo minúsculas, números y guiones bajos (`^[a-z0-9_]+$`).
-- `email`: dirección de correo electrónico válida.
-- `age` (estudiante): entero entre 18 y 99.
-- `name` / `species` (mascota): texto de 1 a 50 caracteres, sin etiquetas HTML.
-- `age` (mascota): entero entre 0 y 100 (opcional).
+- `name` (estudiante): texto obligatorio.
+- `email` (estudiante): dirección válida y opcional.
+- `name` y `species` (mascota): texto entre 1 y 50 caracteres, sin etiquetas HTML.
+- `age` (mascota): entero entre 0 y 100, opcional.
 
 Unicidad (rechazado con `409 Conflict`):
 
-- Estudiante: `email` y `username` deben ser únicos.
-- Mascota: `name` debe ser único dentro de un mismo estudiante.
+- Estudiante: `email` es único cuando se informa.
+- En una solicitud de alta: los nombres de mascotas no pueden repetirse.
+- El esquema ORM también declara el nombre de mascota único por estudiante.
 
 ## Estándar de respuesta JSON
 
@@ -108,11 +106,7 @@ Un middleware global ([`api_response.py`](app/shared/api_response.py)) envuelve 
   "data": {
     "id": "c3600646-abe8-4be3-8096-d6ad629388e2",
     "name": "Juan Pérez",
-    "username": "juanperez",
-    "email": "juan@example.com",
-    "age": 20,
-    "createdAt": "2026-09-09T16:49:33.000Z",
-    "updatedAt": "2026-09-09T16:49:33.000Z"
+    "email": "juan@example.com"
   }
 }
 ```
@@ -172,7 +166,7 @@ Ambos casos comparten el **mismo esquema** para que el frontend los trate igual:
 }
 ```
 
-- `400 Bad Request`: cuando falla la validación. Los DTOs replican las reglas y mensajes de class-validator (NestJS) en español; el handler global ([`exceptions.py`](app/shared/exceptions.py)) convierte los errores al mapa `{ campo: { message } }` (si un campo falla varias reglas, los mensajes se concatenan con `", "`; las propiedades no permitidas devuelven `errors: {}`).
+- `400 Bad Request`: cuando falla la validación de entrada. El handler global ([`exceptions.py`](app/shared/exceptions.py)) convierte los errores al mapa `{ campo: { message } }` (si un campo falla varias reglas, los mensajes se concatenan con `", "`).
 - `409 Conflict`: cuando se viola una restricción de unicidad. Los servicios lanzan una `HTTPException` con el mismo mapa `errors`, por lo que es indistinguible de una validación a nivel de estructura.
 
 ### Interpretación en el frontend
@@ -182,48 +176,34 @@ El cliente estático (`public/`) consume este estándar de forma uniforme:
 - `public/js/api.js` expone `api()` (hace `fetch` y devuelve `data` en éxito o lanza el envelope en error) y `normalizeErrors()` (convierte `{ campo: { message } }` en `{ campo: message }`).
 - En los formularios, si la respuesta trae `errors`, cada mensaje se muestra bajo su input correspondiente; si trae `error`, se muestra como notificación global (toast).
 
-## Contexto técnico
+## Contexto técnico y Dockerización
+- Backend: FastAPI
+- Persistencia: Base de datos relacional PostgreSQL 15 en contenedor Docker
+- Administrador Visual: pgAdmin 4 en contenedor Docker accesible vía navegador web
+- ORM & Migraciones: SQLAlchemy con Alembic para el control de versiones de la base de datos
+- Variables de Entorno: Configuración segura mediante archivo `.env`
+- Validación: Pydantic v2
+- Frontend: archivos estáticos en public/ (Alpine.js + Tailwind CSS + vanilla-sonner, vía CDN)
+- Gestor de dependencias: uv
+- Documentación: Swagger en /docs
 
-- **Backend**: FastAPI
-- **Persistencia**: en memoria (repositorios respaldados por diccionarios); los datos se pierden al reiniciar
-- **Validación**: Pydantic v2
-- **Frontend**: archivos estáticos en `public/` (Alpine.js + Tailwind CSS + vanilla-sonner, vía CDN)
-- **Gestor de dependencias**: uv
-- **Documentación**: Swagger en `/docs`
+## Ejecución con Docker (Recomendado)
 
-## Ejecución local
+1. Copiar `.env.example` a `.env` y cambiar las claves de ejemplo para uso local.
+2. Iniciar PostgreSQL y pgAdmin con `docker compose up -d`.
+3. Instalar dependencias con `uv sync --group dev`.
+4. Configurar `DATABASE_URL` en la terminal donde se ejecutará la API. En PowerShell, por ejemplo: `$env:DATABASE_URL = "postgresql://postgres:CAMBIAR_CLAVE@localhost:5432/taller_db"`.
+5. Iniciar la API con `make dev`; abre Swagger en `http://localhost:3000/docs`.
 
-1. Instalar dependencias:
+Compose inicia PostgreSQL y pgAdmin, no la API. La aplicación no ejecuta migraciones automáticamente; la creación del esquema debe prepararse antes de usar las rutas persistidas.
 
-    ```bash
-    make install
-    ```
+Las variables de `.env` son consumidas por Docker Compose. La aplicación lee `DATABASE_URL` del entorno del proceso y no carga `.env` automáticamente.
 
-    O directamente con uv:
+## Pruebas
 
-    ```bash
-    uv sync
-    ```
+Instala las dependencias de desarrollo y ejecuta `uv run pytest`. La matriz de casos y sus resultados actuales están en [`pruebas.md`](pruebas.md). Las pruebas usan SQLite temporal y no requieren la base PostgreSQL local.
 
-2. Levantar el servidor en modo desarrollo:
-
-    ```bash
-    make dev
-    ```
-
-    O usando uv:
-
-    ```bash
-    uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 3000
-    ```
-
-La aplicación queda disponible en:
-
-- `http://localhost:3000`
-- `http://localhost:3000/docs`
-
-> Al ser un almacenamiento en memoria, los datos se pierden cada vez que se reinicia el servidor (incluido el reload de desarrollo).
-
+El diagrama y el estado de las tareas de Isidora están en [`docs/diagrama-estudiantes-mascotas.md`](docs/diagrama-estudiantes-mascotas.md) y [`docs/avance-isidora.md`](docs/avance-isidora.md).
 ## Comandos útiles
 
 - `make install` — sincroniza dependencias con uv
