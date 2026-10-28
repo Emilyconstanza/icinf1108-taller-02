@@ -181,48 +181,29 @@ El cliente estático (`public/`) consume este estándar de forma uniforme:
 - `public/js/api.js` expone `api()` (hace `fetch` y devuelve `data` en éxito o lanza el envelope en error) y `normalizeErrors()` (convierte `{ campo: { message } }` en `{ campo: message }`).
 - En los formularios, si la respuesta trae `errors`, cada mensaje se muestra bajo su input correspondiente; si trae `error`, se muestra como notificación global (toast).
 
-## Contexto técnico
+## Contexto técnico y Dockerización
+- Backend: FastAPI
+- Persistencia: Base de datos relacional PostgreSQL 15 en contenedor Docker
+- Administrador Visual: pgAdmin 4 en contenedor Docker accesible vía navegador web
+- ORM & Migraciones: SQLAlchemy con Alembic para el control de versiones de la base de datos
+- Variables de Entorno: Configuración segura mediante archivo `.env`
+- Validación: Pydantic v2
+- Frontend: archivos estáticos en public/ (Alpine.js + Tailwind CSS + vanilla-sonner, vía CDN)
+- Gestor de dependencias: uv
+- Documentación: Swagger en /docs
 
-- **Backend**: FastAPI
-- **Persistencia**: en memoria (repositorios respaldados por diccionarios); los datos se pierden al reiniciar
-- **Validación**: Pydantic v2
-- **Frontend**: archivos estáticos en `public/` (Alpine.js + Tailwind CSS + vanilla-sonner, vía CDN)
-- **Gestor de dependencias**: uv
-- **Documentación**: Swagger en `/docs`
+## Ejecución con Docker (Recomendado)
 
-## Ejecución local
-
-1. Instalar dependencias:
-
-    ```bash
-    make install
-    ```
-
-    O directamente con uv:
-
-    ```bash
-    uv sync
-    ```
-
-2. Levantar el servidor en modo desarrollo:
-
-    ```bash
-    make dev
-    ```
-
-    O usando uv:
-
-    ```bash
-    uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 3000
-    ```
-
-La aplicación queda disponible en:
-
-- `http://localhost:3000`
-- `http://localhost:3000/docs`
-
-> Al ser un almacenamiento en memoria, los datos se pierden cada vez que se reinicia el servidor (incluido el reload de desarrollo).
-
+1. Crear el archivo `.env` en la raíz del proyecto:
+   ```env
+   POSTGRES_USER=postgres
+   POSTGRES_PASSWORD=postgres_password
+   POSTGRES_DB=taller_db
+   POSTGRES_PORT=5432
+   PGADMIN_DEFAULT_EMAIL=admin@admin.com
+   PGADMIN_DEFAULT_PASSWORD=admin_password
+   DATABASE_URL=postgresql://postgres:postgres_password@db:5432/taller_db
+   
 ## Comandos útiles
 
 - `make install` — sincroniza dependencias con uv
