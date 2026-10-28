@@ -232,3 +232,26 @@ La aplicación queda disponible en:
 - `make format` — formatea el código con Ruff
 - `make format-check` — verifica el formato
 - `make clean` — elimina `.venv`, cachés y artefactos
+
+## Migraciones de base de datos
+
+Alembic administra el esquema PostgreSQL para estudiantes y mascotas. Antes de
+crear o aplicar migraciones, configura `DATABASE_URL` en el entorno o en un
+archivo `.env` en la raíz del proyecto. Por ejemplo:
+
+```text
+DATABASE_URL=postgresql+psycopg://usuario:contraseña@localhost:5432/estudiantes
+```
+
+Los modelos ORM definen las tablas `students` y `pets`, su relación uno-a-muchos,
+las restricciones de unicidad y la eliminación en cascada. Para crear y aplicar
+una migración:
+
+```bash
+uv run alembic revision --autogenerate -m "Migracion inicial de modelos y relaciones"
+uv run alembic upgrade head
+```
+
+La API actual todavía utiliza repositorios en memoria; estas migraciones crean
+el esquema de base de datos, pero no cambian aún la persistencia de los
+endpoints.
