@@ -1,11 +1,12 @@
 # CRUD Students & Pets (FastAPI)
 
-Proyecto FastAPI que implementa un **CRUD** para la entidad `Student` y sus `Pet`, con **almacenamiento en memoria** a través de repositorios respaldados por diccionarios. Los datos viven mientras el proceso esté corriendo.
+Proyecto FastAPI para administrar estudiantes y mascotas. La creación de un estudiante junto con sus mascotas se guarda en PostgreSQL mediante una única transacción SQLAlchemy.
 
 ## Tecnologías
 
 - Python 3.13
-- FastAPI + repositorios en memoria
+- FastAPI, SQLAlchemy y PostgreSQL
+- Repositorios en memoria para las rutas de mascotas existentes
 - HTML + JS + Tailwind CSS (frontend estático)
 
 ## Resumen funcional
@@ -18,7 +19,7 @@ La API expone operaciones CRUD completas sobre estudiantes y mascotas:
 - **Listar**: `GET /api/students`
 - **Buscar por id**: `GET /api/students/:id`
 - **Actualizar**: `PATCH /api/students/:id`
-- **Eliminar**: `DELETE /api/students/:id` (elimina también sus mascotas)
+- **Eliminar**: `DELETE /api/students/:id` (elimina al estudiante y sus mascotas persistidas en la base de datos)
 
 **Mascotas** — `/api/students/:studentId/pets`
 
@@ -34,9 +35,7 @@ La API expone operaciones CRUD completas sobre estudiantes y mascotas:
 ```json
 {
 	"name": "Ana Pérez",
-	"username": "ana_perez",
 	"email": "ana@example.com",
-	"age": 21,
 	"pets": [
 		{ "name": "Firulais", "species": "perro", "age": 3 },
 		{ "name": "Michi", "species": "gato" }
@@ -44,9 +43,9 @@ La API expone operaciones CRUD completas sobre estudiantes y mascotas:
 }
 ```
 
-Si no se envía `pets` (o se envía vacío), el comportamiento es exactamente el mismo de antes.
+Si no se envía `pets` (o se envía vacío), se crea únicamente el estudiante.
 
-> **Punto de transacción:** este endpoint realiza varias escrituras (el estudiante y cada mascota). Con un ORM/SQL, todas deben ejecutarse dentro de una transacción: si una mascota falla (por ejemplo, por nombre duplicado), el estudiante y las mascotas anteriores no deben quedar guardados. En esta versión en memoria la implementación es secuencial y **no** hace rollback, a propósito, para que la actividad de ORM/transacciones parta de ese problema.
+> **Transacción:** el endpoint agrega el estudiante, obtiene su ID con `flush()`, agrega las mascotas y confirma una sola vez con `commit()`. Si ocurre un error, ejecuta `rollback()` para que no queden cambios parciales. Los nombres de mascotas repetidos en el mismo envío se rechazan con HTTP 409.
 
 ### Modelo de datos
 
